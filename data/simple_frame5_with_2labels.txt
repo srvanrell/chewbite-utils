@@ -1,0 +1,5 @@
+1		3		rumia
+4		9		rumia
+9		11		pastoreo
+17		19		otro
+7       24      otro otro

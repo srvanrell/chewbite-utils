@@ -9,9 +9,10 @@ standardized_names = {"RUMIA PASTURA": "RUMIA", "PASTURA": "PASTOREO", "RUMIA PA
                       "R": "RUMIA", "P": "PASTOREO"}
 segmentation_replacements = {"RUMIA": "SEGMENTACION", "PASTOREO": "SEGMENTACION", "REGULAR": "SEGMENTACION"}
 _names_of_interest = ["PASTOREO", "RUMIA"]
+_name_of_segmentation = ["SEGMENTACION"]
 
 
-def load_chewbite(filename, start=None, end=None, verbose=True, to_segmentation=False):
+def load_chewbite(filename: str, start: int = None, end: int = None, verbose=True, to_segmentation=False) -> pd.Series:
     df = pd.read_table(filename, decimal=',', header=None, delim_whitespace=True, 
                        names=["bl_start", "bl_end", "label"], usecols=[0, 1, 2])
 
@@ -32,10 +33,12 @@ def load_chewbite(filename, start=None, end=None, verbose=True, to_segmentation=
         df = df[df.bl_start < end]
         df.loc[df.bl_end > end, "bl_end"] = end
         df = df[df.bl_end <= end]
+
     names_of_interest = _names_of_interest
     if to_segmentation:
-        names_of_interest = ["SEGMENTACION"]
+        names_of_interest = _name_of_segmentation
         df.label.replace(segmentation_replacements, inplace=True)
+
     if verbose:
         print("Labels in (", start, ",", end, ") from", filename, "\n", df.label.unique())
 
@@ -72,9 +75,7 @@ def length_signal_chewbite(filename, start=None, end=None, verbose=True, to_segm
     df.dropna(axis=1, how='all', inplace=True)
     df.columns = ["start", "end", "label"]
 
-    df[["start", "end"]] = df[["start", "end"]].astype('float')
-
-    df = df.round(0)
+    df[["start", "end"]] = df[["start", "end"]].astype('float').round(0)
     df[["start", "end"]] = df[["start", "end"]].astype('int')
 
     # It will modify the limits of partially selected labels
@@ -216,3 +217,77 @@ def my_display_report(complete_report_df):
     for activity_label, single_activity_report in report_activity_grouped:
         print("\n================", activity_label, "================\n")
         violinplot_metric_from_report(single_activity_report, "frame_f1score")
+
+
+def load_chewbite2(filename: str, start: int = None, end: int = None, verbose=True, to_segmentation=False,
+                   decimals=0, frame_len=1, names_of_interest: list = None) -> pd.Series:
+
+    blocks_in = pd.read_table(filename, decimal='.', header=None, delim_whitespace=True,
+                              names=["start", "end", "label"], usecols=[0, 1, 2])
+
+    blocks_in.loc[:, "start":"end"] = blocks_in.loc[:, "start":"end"].astype('float').round(decimals)
+    blocks_in.label = blocks_in.label.str.strip().str.upper().replace(standardized_names)
+
+    # It will modify the limits of partially selected labels
+    # Given end and start may be in the middle of a label
+    if start:
+        blocks_in = blocks_in[blocks_in.end > start]
+        blocks_in.loc[blocks_in.start < start, "start"] = start
+        blocks_in = blocks_in[blocks_in.start >= start]
+    else:
+        start = 0
+
+    if end:
+        blocks_in = blocks_in[blocks_in.start < end]
+        blocks_in.loc[blocks_in.end > end, "end"] = end
+        blocks_in = blocks_in[blocks_in.end <= end]
+    else:
+        end = blocks_in.end.max()
+
+    if not names_of_interest:
+        names_of_interest = _names_of_interest
+
+    if to_segmentation:
+        names_of_interest = _name_of_segmentation
+        blocks_in.label.replace(segmentation_replacements, inplace=True)
+
+    if verbose:
+        print("Labels in (", start, ",", end, ") from", filename, "\n", blocks_in.label.unique())
+
+    blocks_in = blocks_in.loc[blocks_in.label.isin(names_of_interest)]
+    if verbose:
+        print(blocks_in)
+
+    start_out = np.arange(start, end, frame_len)
+    end_out = start_out + frame_len
+    frames_out = pd.DataFrame({"start": start_out, "end": end_out, "label": ""})
+
+    def printing(frame):
+        criteria = (blocks_in.end >= frame.start) & (blocks_in.start < frame.end)
+        blocks_in_frame = blocks_in.loc[criteria].copy()
+
+        blocks_in_frame.loc[blocks_in_frame.start < frame.start, "start"] = frame.start
+        blocks_in_frame.loc[blocks_in_frame.end > frame.end, "end"] = frame.end
+        blocks_in_frame["overlap"] = (blocks_in_frame.end - blocks_in_frame.start) / frame_len
+        null_overlap = 1.0 - blocks_in_frame["overlap"].sum()
+        blocks_in_frame = blocks_in_frame.append({"label": "", "overlap": null_overlap}, ignore_index=True)
+
+        frame.label = blocks_in_frame.groupby("label").sum().sort_values("overlap").last_valid_index()
+
+        return frame
+
+    frames_out = frames_out.apply(printing, axis="columns")
+
+    if verbose:
+        print(frames_out)
+
+    # if len(segments) < 1:
+    #     print("Warning, you are trying to load a span with no labels from:", filename)
+    #     indexes = [np.array([])]  # To avoid errors when no blocks are present in the given interval
+    #
+    # if s.index.has_duplicates:
+    #     print("Overlapping labels were found in", filename)
+    #     print("Check labels corresponding to times given below (in seconds):")
+    #     print(s.index[s.index.duplicated()])
+
+    return frames_out
