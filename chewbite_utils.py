@@ -219,8 +219,8 @@ def my_display_report(complete_report_df):
         violinplot_metric_from_report(single_activity_report, "frame_f1score")
 
 
-def load_chewbite2(filename: str, start: int = None, end: int = None, verbose=True, to_segmentation=False,
-                   decimals=0, frame_len=1, names_of_interest: list = None) -> pd.Series:
+def load_chewbite2(filename: str, start: float = None, end: float = None, verbose=True, to_segmentation=False,
+                   decimals: int = 0, frame_len: float = 1.0, names_of_interest: list = None) -> pd.DataFrame:
 
     blocks_in = pd.read_table(filename, decimal='.', header=None, delim_whitespace=True,
                               names=["start", "end", "label"], usecols=[0, 1, 2])
@@ -229,18 +229,16 @@ def load_chewbite2(filename: str, start: int = None, end: int = None, verbose=Tr
     blocks_in.label = blocks_in.label.str.strip().str.upper().replace(standardized_names)
 
     # It will modify the limits of partially selected labels
-    # Given end and start may be in the middle of a label
+    # end and start may be in the middle of a label
     if start:
         blocks_in = blocks_in[blocks_in.end > start]
         blocks_in.loc[blocks_in.start < start, "start"] = start
-        blocks_in = blocks_in[blocks_in.start >= start]
     else:
-        start = 0
+        start = 0.0
 
     if end:
         blocks_in = blocks_in[blocks_in.start < end]
         blocks_in.loc[blocks_in.end > end, "end"] = end
-        blocks_in = blocks_in[blocks_in.end <= end]
     else:
         end = blocks_in.end.max()
 
@@ -281,13 +279,7 @@ def load_chewbite2(filename: str, start: int = None, end: int = None, verbose=Tr
     if verbose:
         print(frames_out)
 
-    # if len(segments) < 1:
-    #     print("Warning, you are trying to load a span with no labels from:", filename)
-    #     indexes = [np.array([])]  # To avoid errors when no blocks are present in the given interval
-    #
-    # if s.index.has_duplicates:
-    #     print("Overlapping labels were found in", filename)
-    #     print("Check labels corresponding to times given below (in seconds):")
-    #     print(s.index[s.index.duplicated()])
+    if list(frames_out.label.unique()) == [""]:
+        print("Warning, you are trying to load a span (", start, ",", end, ") with no labels from:", filename)
 
     return frames_out
