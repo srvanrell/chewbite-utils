@@ -3,6 +3,7 @@ from armetrics import plotter
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 standardized_names = {"RUMIA PASTURA": "RUMIA", "PASTURA": "PASTOREO", "RUMIA PASTOREO": "RUMIA",
                       "RUMIA EN PASTURA": "RUMIA", "GRAZING": "PASTOREO", "RUMINATION": "RUMIA",
@@ -260,7 +261,17 @@ def load_chewbite2(filename: str, start: float = None, end: float = None, verbos
     end_out = start_out + frame_len
     frames_out = pd.DataFrame({"start": start_out, "end": end_out, "label": ""})
 
-    def printing(frame):
+    to_revise_label = "to_revise"
+    for row_id, block in blocks_in.iterrows():
+        criteria = (frames_out.start >= block.start) & (frames_out.end <= block.end)
+        frames_out.loc[criteria, "label"] = block.label
+
+        criteria = (frames_out.start >= block.start) & (frames_out.start < block.end) & (frames_out.end > block.end)
+        frames_out.loc[criteria, "label"] = to_revise_label
+        criteria = (frames_out.start < block.start) & (frames_out.end > block.start) & (frames_out.end <= block.end)
+        frames_out.loc[criteria, "label"] = to_revise_label
+
+    def revise_frame(frame):
         criteria = (blocks_in.end >= frame.start) & (blocks_in.start < frame.end)
         blocks_in_frame = blocks_in.loc[criteria].copy()
 
@@ -274,7 +285,8 @@ def load_chewbite2(filename: str, start: float = None, end: float = None, verbos
 
         return frame
 
-    frames_out = frames_out.apply(printing, axis="columns")
+    to_revise_frames = frames_out.label == to_revise_label
+    frames_out.loc[to_revise_frames] = frames_out.loc[to_revise_frames].apply(revise_frame, axis="columns")
 
     if verbose:
         print(frames_out)
@@ -283,3 +295,34 @@ def load_chewbite2(filename: str, start: float = None, end: float = None, verbos
         print("Warning, you are trying to load a span (", start, ",", end, ") with no labels from:", filename)
 
     return frames_out
+
+
+def merge_true_pred(filename_true, filename_pred, **kwargs):
+    y_true = load_chewbite2(filename_true, verbose=False, **kwargs)
+    y_pred = load_chewbite2(filename_pred, verbose=False, **kwargs)
+    merged = pd.merge(y_pred, y_true, on=["start", "end"],
+                      how="outer", suffixes=("_pred", "_true"), sort=True).fillna("")
+    return merged
+
+
+def compute_cm_and_plot(df_true_pred):
+    cm = pd.crosstab(df_true_pred.label_true, df_true_pred.label_pred,
+                     rownames=['True'], colnames=['Predicted'], normalize="index")
+    sns.heatmap(cm, annot=True, cmap="Blues", cbar=None, fmt=".2f", square=True)
+    plt.show()
+
+
+def cm_single_pred(true_filenames, pred_filenames, pred_name, starts_ends=None, **kwargs):
+    if starts_ends is None:
+        starts_ends = [(None, None)] * len(true_filenames)
+
+    print("\n================", pred_name, "================\n")
+    to_concat = [merge_true_pred(truef, predf, start=s, end=e, **kwargs) for truef, predf, (s, e) in
+                 zip(true_filenames, pred_filenames, starts_ends)]
+    concatenated = pd.concat(to_concat, ignore_index=True)
+    compute_cm_and_plot(concatenated)
+
+
+def plot_predictors_cm(true_filenames, names_of_predictors, *argv_prediction_filenames, **kwargs):
+    for pred_name, pred_filenames in zip(names_of_predictors, argv_prediction_filenames):
+        cm_single_pred(true_filenames, pred_filenames, pred_name, **kwargs)
